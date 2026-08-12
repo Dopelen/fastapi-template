@@ -1,0 +1,19 @@
+# Секреты. Настоящие настройки лежат в .env, в репозиторий едет только
+# example.env как образец.
+.env
+.env.*
+!.env.example
+
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+.idea/
+.vscode/

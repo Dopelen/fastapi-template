@@ -1,45 +1,43 @@
-import asyncio
-from aiokafka import AIOKafkaProducer
 import json
-from aiokafka.errors import KafkaConnectionError
+import logging
+
+from aiokafka import AIOKafkaProducer
 from pydantic import BaseModel
 
 from app.config import settings
+from app.kafka.utils import start_with_retries
+
+logger = logging.getLogger(__name__)
 
 
-producer: AIOKafkaProducer | None = None
+class KafkaProducer:
+    """Отправка сообщений в Kafka.
+    Экземпляр класса хранится в app.state: состояние привязано к приложению, а не к модулю,
+    и в тестах подменяется через dependency_overrides без возни с global.
+    """
 
-async def start_kafka_producer():
-    global producer
-    producer = AIOKafkaProducer(
-        bootstrap_servers=settings.kafka_broker,
-        value_serializer=lambda v: json.dumps(v).encode("utf-8")
-    )
-    for attempt in range(10):
-        try:
-            await producer.start()
-            print("Kafka producer started!")
-            return
-        except KafkaConnectionError:
-            print(f"Kafka not ready, retrying {attempt + 1}/10...")
-            await asyncio.sleep(3)
-    raise RuntimeError("Could not connect to Kafka")
+    def __init__(self) -> None:
+        self._producer: AIOKafkaProducer | None = None
 
+    async def start(self) -> None:
+        self._producer = AIOKafkaProducer(
+            bootstrap_servers=settings.kafka_broker,
+            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+        )
+        await start_with_retries(self._producer, "producer")
 
-async def stop_kafka_producer():
-    global producer
-    if producer:
-        await producer.stop()
-        producer = None
+    async def stop(self) -> None:
+        if self._producer is not None:
+            await self._producer.stop()
+            logger.info("Producer остановлен")
+            self._producer = None
 
+    async def send(self, topic: str, value: BaseModel | dict, key: str | None = None) -> None:
+        if self._producer is None:
+            raise RuntimeError("Kafka producer not started")
 
-async def send_message(topic: str, value: BaseModel | dict, key: str = None):
-    """Отправка сообщения в Kafka, сериализация только один раз"""
-    if not producer:
-        raise RuntimeError("Kafka producer not started")
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json")
 
-    if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
-
-    print(f"Sending to Kafka: {value}")
-    await producer.send_and_wait(topic, value=value, key=key.encode() if key else None)
+        logger.info("Отправка в Kafka: %s", value)
+        await self._producer.send_and_wait(topic, value=value, key=key.encode() if key else None)

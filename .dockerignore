@@ -1,0 +1,26 @@
+# В Dockerfile стоит "COPY . .", и без этого файла в образ уезжало всё подряд:
+# история git (208 КБ), настройки IDE, кеш pytest. А появись рядом .env -
+# уехал бы и он, вместе с паролями.
+
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+.idea/
+.vscode/
+
+README.md

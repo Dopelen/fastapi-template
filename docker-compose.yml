@@ -1,4 +1,8 @@
-version: "3.8"
+# Имя проекта задано явно: по умолчанию Compose берёт его из названия папки,
+# а из "Fastapi-template__FastAPI-PostgreSQL-Kafka___" получается имя образа
+# с сочетанием "__-", недопустимым в ссылках Docker.
+name: fastapi-template
+
 services:
   kafka:
     image: bitnami/kafka:latest
@@ -17,25 +21,52 @@ services:
       - "29092:29092"   # для подключения извне (localhost:29092)
     volumes:
       - kafka_data:/bitnami/kafka
+    # Брокер поднимается заметно дольше приложения. Без healthcheck app стартовал
+    # одновременно с ним и полагался только на ретраи внутри кода.
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
 
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: mydb
+      POSTGRES_USER: ${DB_USER:-user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_DB: ${DB_NAME:-mydb}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-user} -d ${DB_NAME:-mydb}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
   app:
     build: .
-    env_file:
-      - example.env
+    # Переменные задаются здесь, а не через env_file
+    environment:
+      APP_NAME: ${APP_NAME:-FastAPI Template}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-mydb}
+      DB_USER: ${DB_USER:-user}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      KAFKA_BROKER: kafka:9092
+      KAFKA_TOPIC: ${KAFKA_TOPIC:-my_topic}
+      KAFKA_GROUP: ${KAFKA_GROUP:-default-group}
+    # С условиями, а не просто списком: depends_on без condition гарантирует
+    # только порядок запуска контейнеров, но не готовность сервисов принимать
+    # соединения.
     depends_on:
-      - kafka
-      - postgres
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     ports:
       - "8000:8000"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
